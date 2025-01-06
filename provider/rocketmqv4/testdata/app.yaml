@@ -1,0 +1,14 @@
+aliyun:
+  type: rocketmq-v4
+  endPoint: "127.0.0.1:9876"
+  consumers:
+    service1:
+      topic: "Trading_Notify"
+      group: "GID_TradingWebNotifyConsumer"
+      messageTag: "*"
+      kind: "orderly"
+  producers:
+    service1:
+      topic: "Trading_Notify"
+      kind: "orderly"
+      group: "GID_SBL_Producer"

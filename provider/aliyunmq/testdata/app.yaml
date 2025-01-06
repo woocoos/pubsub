@@ -1,0 +1,18 @@
+aliyun:
+  type: rocketmq-aliyun-v4
+  endPoint: ${endPoint}
+  instanceId: ${instanceId}
+  accessKey: ${accessKey}
+  secretKey: ${secretKey}
+  maxRecMsgNum: 10
+  consumers:
+    service1:
+      topic: "Trading_Notify"
+      group: "GID_TradingWebNotifyConsumer"
+      messageTag: "*"
+      kind: "orderly"
+  producers:
+    service1:
+      topic: "Trading_Notify"
+      kind: "orderly"
+      group: "GID_SBL_Producer"
