@@ -5,15 +5,6 @@ import (
 	"github.com/tsingsun/woocoo"
 )
 
-// Subscriber is an interface for message queue subscriber.
-type Subscriber interface {
-}
-
-// Publisher is an interface for message queue publisher.
-type Publisher interface {
-	PublishMessage(ctx context.Context, msg *Message) error
-}
-
 // Provider is an interface for message queue provider.
 // this is also a wrapper for the sdk of mq officer client.
 type Provider interface {

@@ -115,17 +115,15 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.PublishTime)),
 				}
-				err := handler(context.Background(), msg)
-				if err != nil {
-					logger.Error("aliyunmq: messageHandler error", zap.Any("entity", v))
+				if err := handler(context.Background(), msg); err != nil {
+					logger.Error("aliyunmq: messageHandler error", zap.Any("entity", v), zap.Error(err))
 				}
 				handles = append(handles, v.ReceiptHandle)
 			}
 			// NextConsumeTime前若不确认消息消费成功，则消息会被重复消费。
 			// 消息句柄有时间戳，同一条消息每次消费拿到的都不一样。
-			ackerr := consumer.AckMessage(handles)
-			if ackerr != nil {
-				logger.Error("aliyunmq: ack error", zap.Error(ackerr))
+			if err := consumer.AckMessage(handles); err != nil {
+				logger.Error("aliyunmq: ack error", zap.Error(err))
 				time.Sleep(time.Duration(3) * time.Second)
 			}
 			endChan <- 1

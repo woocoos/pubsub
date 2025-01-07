@@ -203,9 +203,8 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.BornTimestamp)),
 				}
-				err := handler(context.Background(), msg)
-				if err != nil {
-					logger.Error("messageHandler error", zap.Any("entity", v))
+				if err := handler(context.Background(), msg); err != nil {
+					logger.Error("messageHandler error", zap.Any("entity", v), zap.Error(err))
 				}
 			}
 			return consumer.ConsumeSuccess, nil
