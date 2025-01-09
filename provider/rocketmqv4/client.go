@@ -182,7 +182,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 	if !ok {
 		return fmt.Errorf("no consumer config for serviceName: %s", opts.ServiceName)
 	}
-	log.Infof("aliyunmq subscribe topic %s", cc.Topic)
+
 	cs, err := rocketmq.NewPushConsumer(consumer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
 		consumer.WithConsumerModel(consumer.Clustering),
 		consumer.WithGroupName(cc.Group),
@@ -214,6 +214,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 		return err
 	}
 
+	log.Infof("subscribe topic %s", cc.Topic)
 	if err = cs.Start(); err != nil {
 		return err
 	}

@@ -1,0 +1,13 @@
+rocketMQ:
+  type: "rocketmq-v4"
+  endPoint: "127.0.0.1:9876"
+  accessKey: ""
+  secretKey: ""
+  logLevel: "debug"
+  maxRecMsgNum: 10
+  consumers:
+    tradingNotify:
+      topic: "Trading_Notify"
+      group: "TradingWebNotifyConsumer"
+      messageTag: "*"
+      kind: "orderly"
