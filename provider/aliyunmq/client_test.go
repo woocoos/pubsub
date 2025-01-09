@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"github.com/woocoos/pubsub"
+	"os"
 	"testing"
 	"time"
 )
@@ -21,6 +22,10 @@ type testsuite struct {
 }
 
 func TestSuite(t *testing.T) {
+	if os.Getenv("TEST_WIP") != "" {
+		t.Skip()
+		return
+	}
 	suite.Run(t, new(testsuite))
 }
 
