@@ -1,4 +1,4 @@
-module github.com/woocoos/pubsub/mock/rocketmq
+module github.com/woocoos/pubsub/contrib/mock/rocketmq
 
 go 1.23.0
 
