@@ -8,7 +8,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.34.0
 	github.com/tsingsun/woocoo v0.5.2
-	github.com/woocoos/pubsub v0.0.0-20250109041928-14c3cba9757c
+	github.com/woocoos/pubsub v0.0.0-20250109073103-c2fd10c340d6
 )
 
 require (
