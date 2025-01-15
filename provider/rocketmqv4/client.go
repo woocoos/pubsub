@@ -81,7 +81,7 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 		if err != nil {
 			panic(err)
 		}
-		rlog.SetLogger(apacheLogger{
+		rlog.SetLogger(&apacheLogger{
 			level:  ll,
 			logger: pubsub.Logger(),
 		})
