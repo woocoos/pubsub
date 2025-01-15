@@ -1,4 +1,4 @@
-aliyun:
+rocketmq-v4:
   type: rocketmq-v4
   endPoint: "127.0.0.1:9876"
   consumers:

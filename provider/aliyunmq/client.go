@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var logger = log.Component("pubsub")
+var logger log.ComponentLogger
 
 const mqTypeName = "rocketmq-aliyun-v4"
 
@@ -57,6 +57,22 @@ type Provider struct {
 	client mqhttpsdk.MQClient
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// New create a new aliyunmq provider
+func New(cfg *conf.Configuration) (pubsub.Provider, error) {
+	var pc ProviderConfig
+	err := cfg.Unmarshal(&pc)
+	if err != nil {
+		return nil, err
+	}
+	p := &Provider{
+		ProviderConfig: pc,
+		client:         mqhttpsdk.NewAliyunMQClient(pc.EndPoint, pc.AccessKey, pc.SecretKey, ""),
+	}
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	logger = pubsub.Logger()
+	return p, nil
 }
 
 func (p *Provider) Start(ctx context.Context) error {
@@ -115,7 +131,7 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.PublishTime)),
 				}
-				if err := handler(context.Background(), msg); err != nil {
+				if err := handler(context.Background(), &msg); err != nil {
 					logger.Error("aliyunmq: messageHandler error", zap.Any("entity", v), zap.Error(err))
 				}
 				handles = append(handles, v.ReceiptHandle)
@@ -177,19 +193,4 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 
 	_, err := producer.PublishMessage(req)
 	return err
-}
-
-// New create a new aliyunmq provider
-func New(cfg *conf.Configuration) (pubsub.Provider, error) {
-	var pc ProviderConfig
-	err := cfg.Unmarshal(&pc)
-	if err != nil {
-		return nil, err
-	}
-	p := &Provider{
-		ProviderConfig: pc,
-		client:         mqhttpsdk.NewAliyunMQClient(pc.EndPoint, pc.AccessKey, pc.SecretKey, ""),
-	}
-	p.ctx, p.cancel = context.WithCancel(context.Background())
-	return p, nil
 }

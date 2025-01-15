@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gogap/errors"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"google.golang.org/protobuf/proto"
 	"reflect"
+)
+
+var (
+	ErrMissHandler = errors.New("handler cannot be nil")
 )
 
 // providerBuildFunc is the function to build a provider.
@@ -18,16 +23,6 @@ var providerBuilder = make(map[string]providerBuildFunc)
 func RegisterProvider(name string, builder providerBuildFunc) {
 	providerBuilder[name] = builder
 }
-
-// TopicKind is the kind of topic.
-type TopicKind string
-
-const (
-	TopicKindCommon TopicKind = "common"
-	TopicKindOrder  TopicKind = "orderly"
-	TopicKindTiming TopicKind = "timing"
-	TopicKindTrans  TopicKind = "trans"
-)
 
 type Client struct {
 	ServiceName string
@@ -57,9 +52,11 @@ func New(cfg *conf.Configuration) (*Client, error) {
 	return client, nil
 }
 
+// On registers a handler function for processing messages.
+// This function uses reflection to verify the correctness of the handler's signature and implements the necessary conversions and validations.
 func (c *Client) On(opts HandlerOptions) error {
 	if opts.Handler == nil {
-		return fmt.Errorf("handler cannot be nil")
+		return ErrMissHandler
 	}
 	// Reflection is slow, but this is done only once on subscriber setup
 	hndlr := reflect.TypeOf(opts.Handler)
@@ -91,7 +88,7 @@ func(ctx context.Context, obj *proto.Message, msg *Message) error
 	}
 
 	fn := reflect.ValueOf(opts.Handler)
-	cb := func(ctx context.Context, m Message) error {
+	cb := func(ctx context.Context, m *Message) error {
 		var err error
 		obj := reflect.New(hndlr.In(1).Elem()).Interface()
 		if opts.JSON {
@@ -107,7 +104,7 @@ func(ctx context.Context, obj *proto.Message, msg *Message) error
 		rtrn := fn.Call([]reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(obj),
-			reflect.ValueOf(&m),
+			reflect.ValueOf(m),
 		})
 		if len(rtrn) == 0 {
 			return nil
@@ -121,27 +118,41 @@ func(ctx context.Context, obj *proto.Message, msg *Message) error
 		return err
 	}
 	mw := chainSubscriberMiddleware(c.Middleware...)
-	return c.Provider.Subscribe(opts, mw(cb))
+	return c.Provider.Subscribe(opts, mw(&opts, cb))
 }
 
-func chainSubscriberMiddleware(mw ...Middleware) func(next MessageHandler) MessageHandler {
-	return func(final MessageHandler) MessageHandler {
-		return func(ctx context.Context, m Message) error {
+// OnRaw register a HandlerOptions with MessageHandler function for processing messages.
+func (c *Client) OnRaw(opts HandlerOptions) error {
+	if opts.Handler == nil {
+		return ErrMissHandler
+	}
+	cb, ok := opts.Handler.(MessageHandler)
+	if !ok {
+		errtpl := `handler should be MessageHandler, format like：func(ctx context.Context, msg *Message) error`
+		return errors.New(errtpl)
+	}
+	mw := chainSubscriberMiddleware(c.Middleware...)
+	return c.Provider.Subscribe(opts, mw(&opts, cb))
+}
+
+func chainSubscriberMiddleware(mw ...Middleware) func(opts *HandlerOptions, next MessageHandler) MessageHandler {
+	return func(opts *HandlerOptions, final MessageHandler) MessageHandler {
+		return func(ctx context.Context, m *Message) error {
 			last := final
 			for i := len(mw) - 1; i >= 0; i-- {
-				last = mw[i].SubscribeInterceptor(last)
+				last = mw[i].SubscribeInterceptor(opts, last)
 			}
 			return last(ctx, m)
 		}
 	}
 }
 
-func chainPublisherMiddleware(mw ...Middleware) func(next PublishHandler) PublishHandler {
-	return func(final PublishHandler) PublishHandler {
+func chainPublisherMiddleware(mw ...Middleware) func(serviceName string, next PublishHandler) PublishHandler {
+	return func(serviceName string, final PublishHandler) PublishHandler {
 		return func(ctx context.Context, m *Message) error {
 			last := final
 			for i := len(mw) - 1; i >= 0; i-- {
-				last = mw[i].PublishInterceptor(ctx, last)
+				last = mw[i].PublishInterceptor(ctx, serviceName, last)
 			}
 			return last(ctx, m)
 		}
@@ -166,7 +177,7 @@ func (c *Client) Publish(ctx context.Context, opts PublishOptions, data any) (er
 		opts.ServiceName = c.ServiceName
 	}
 	mw := chainPublisherMiddleware(c.Middleware...)
-	return mw(func(ctx context.Context, m *Message) error {
+	return mw(opts.ServiceName, func(ctx context.Context, m *Message) error {
 		return c.Provider.Publish(ctx, opts, m)
 	})(ctx, m)
 }

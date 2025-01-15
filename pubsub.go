@@ -32,7 +32,7 @@ type HandlerOptions struct {
 }
 
 // MessageHandler is the internal or raw message handler
-type MessageHandler func(ctx context.Context, m Message) error
+type MessageHandler func(ctx context.Context, m *Message) error
 
 // PublishHandler wraps a call to publish, for interception
 type PublishHandler func(ctx context.Context, m *Message) error
@@ -48,6 +48,6 @@ type PublishOptions struct {
 
 // Middleware is an interface to provide subscriber and publisher interceptors
 type Middleware interface {
-	SubscribeInterceptor(next MessageHandler) MessageHandler
-	PublishInterceptor(ctx context.Context, next PublishHandler) PublishHandler
+	SubscribeInterceptor(opts *HandlerOptions, next MessageHandler) MessageHandler
+	PublishInterceptor(ctx context.Context, serviceName string, next PublishHandler) PublishHandler
 }

@@ -82,7 +82,8 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 			panic(err)
 		}
 		rlog.SetLogger(apacheLogger{
-			level: ll,
+			level:  ll,
+			logger: pubsub.Logger(),
 		})
 	})()
 	return p, nil
@@ -203,7 +204,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.BornTimestamp)),
 				}
-				if err := handler(context.Background(), msg); err != nil {
+				if err := handler(context.Background(), &msg); err != nil {
 					logger.Error("messageHandler error", zap.Any("entity", v), zap.Error(err))
 				}
 			}

@@ -10,42 +10,46 @@ var logger = log.Component("pubsub")
 
 // 替换rocketmq的logger
 type apacheLogger struct {
-	level zapcore.Level
+	level  zapcore.Level
+	logger log.ComponentLogger
 }
 
 func (al apacheLogger) Debug(msg string, fields map[string]interface{}) {
 	if al.level.Enabled(zapcore.DebugLevel) {
-		logger.Debug(msg, zap.Any("fields", fields))
+		al.logger.Debug(msg, zap.Any("fields", fields))
 	}
 }
 
 func (al apacheLogger) Info(msg string, fields map[string]interface{}) {
 	if al.level.Enabled(zapcore.InfoLevel) {
-		logger.Info(msg, zap.Any("fields", fields))
+		al.logger.Info(msg, zap.Any("fields", fields))
 	}
 }
 
 func (al apacheLogger) Warning(msg string, fields map[string]interface{}) {
 	if al.level.Enabled(zapcore.WarnLevel) {
-		logger.Warn(msg, zap.Any("fields", fields))
+		al.logger.Warn(msg, zap.Any("fields", fields))
 	}
 }
 
 func (al apacheLogger) Error(msg string, fields map[string]interface{}) {
 	if al.level.Enabled(zapcore.ErrorLevel) {
-		logger.Error(msg, zap.Any("fields", fields))
+		al.logger.Error(msg, zap.Any("fields", fields))
 	}
 }
 
 func (al apacheLogger) Fatal(msg string, fields map[string]interface{}) {
 	if al.level.Enabled(zapcore.FatalLevel) {
-		logger.Fatal(msg, zap.Any("fields", fields))
+		al.logger.Fatal(msg, zap.Any("fields", fields))
 	}
 }
 
 func (al apacheLogger) Level(level string) {
-	// TODO implement me
-	panic("implement me")
+	ll, err := zapcore.ParseLevel(level)
+	if err != nil {
+		panic(err)
+	}
+	al.level = ll
 }
 
 func (al apacheLogger) OutputPath(path string) (err error) {

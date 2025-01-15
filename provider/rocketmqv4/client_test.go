@@ -32,7 +32,7 @@ func TestSuite(t *testing.T) {
 func (t *testsuite) SetupSuite() {
 	cfg := conf.New(conf.WithBaseDir("testdata"), conf.WithLocalPath("testdata/app.yaml")).Load()
 	var err error
-	t.client, err = pubsub.New(cfg.Sub("aliyun"))
+	t.client, err = pubsub.New(cfg.Sub("rocketmq-v4"))
 	t.Require().NoError(err)
 
 	time.Sleep(time.Second * 2)

@@ -4,6 +4,7 @@ go 1.23
 
 require (
 	github.com/aliyunmq/mq-http-go-sdk v1.0.3
+	github.com/apache/rocketmq-client-go/v2 v2.1.2
 	github.com/gogap/errors v0.0.0-20210818113853-edfbba0ddea9
 	github.com/stretchr/testify v1.9.0
 	github.com/tsingsun/woocoo v0.5.2
@@ -13,7 +14,6 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
-	github.com/apache/rocketmq-client-go/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.12.0 // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect

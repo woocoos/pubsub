@@ -2,7 +2,8 @@ package pubsub
 
 import (
 	"context"
-	"github.com/pkg/errors"
+	"errors"
+	"fmt"
 )
 
 // RecoveryMiddleware is middleware for recovering from panics
@@ -14,11 +15,11 @@ type RecoveryMiddleware struct {
 type RecoveryHandlerFunc func(p interface{}) (err error)
 
 // SubscribeInterceptor returns a subscriber middleware with added logging via Zap
-func (o RecoveryMiddleware) SubscribeInterceptor(next MessageHandler) MessageHandler {
-	return func(ctx context.Context, m Message) (err error) {
+func (o RecoveryMiddleware) SubscribeInterceptor(opts *HandlerOptions, next MessageHandler) MessageHandler {
+	return func(ctx context.Context, m *Message) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				err = recoverFrom(r, "pubsub: subscriber panic \n", o.RecoveryHandlerFunc)
+				err = recoverFrom(r, fmt.Sprintf("subscriber panic on msg id:%s", m.ID), o.RecoveryHandlerFunc)
 			}
 		}()
 		err = next(ctx, m)
@@ -27,11 +28,11 @@ func (o RecoveryMiddleware) SubscribeInterceptor(next MessageHandler) MessageHan
 }
 
 // PublishInterceptor adds recovery to the publisher
-func (o RecoveryMiddleware) PublishInterceptor(ctx context.Context, next PublishHandler) PublishHandler {
+func (o RecoveryMiddleware) PublishInterceptor(ctx context.Context, serviceName string, next PublishHandler) PublishHandler {
 	return func(ctx context.Context, m *Message) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				err = recoverFrom(r, "pubsub: publisher panic \n", o.RecoveryHandlerFunc)
+				err = recoverFrom(r, fmt.Sprintf("publish panic on service: %s,msg id:%s", serviceName, m.ID), o.RecoveryHandlerFunc)
 			}
 		}()
 		err = next(ctx, m)
@@ -50,7 +51,7 @@ func recoverFrom(p interface{}, wrap string, r RecoveryHandlerFunc) error {
 		default:
 			e = errors.New("unknown error occurred")
 		}
-		return errors.Wrap(e, wrap)
+		return fmt.Errorf(wrap+":%w", e)
 	}
 	return r(p)
 }
