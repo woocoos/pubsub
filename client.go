@@ -126,7 +126,7 @@ func (c *Client) OnRaw(opts HandlerOptions) error {
 	if opts.Handler == nil {
 		return ErrMissHandler
 	}
-	cb, ok := opts.Handler.(MessageHandler)
+	cb, ok := opts.Handler.(func(ctx context.Context, m *Message) error)
 	if !ok {
 		errtpl := `handler should be MessageHandler, format like：func(ctx context.Context, msg *Message) error`
 		return errors.New(errtpl)
