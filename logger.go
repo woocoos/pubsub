@@ -54,6 +54,6 @@ func (o LoggerMiddleware) PublishInterceptor(ctx context.Context, serviceName st
 		} else {
 			o.Logger.Ctx(ctx).Debug(fmt.Sprintf("success processing publisher, serviceName:%s,msg:%s", serviceName, m.ID))
 		}
-		return next(ctx, m)
+		return err
 	}
 }

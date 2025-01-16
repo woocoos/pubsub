@@ -44,10 +44,12 @@ func (t *testsuite) TearDownSuite() {
 
 func (t *testsuite) TestService1() {
 	ch := make(chan *pubsub.Message)
+	count := 0
 	opts := pubsub.HandlerOptions{
 		ServiceName: "service1",
 		JSON:        true,
 		Handler: func(ctx context.Context, message *customer, msg *pubsub.Message) error {
+			count++
 			ch <- msg
 			return nil
 		},
@@ -72,4 +74,5 @@ func (t *testsuite) TestService1() {
 		t.Fail("timeout")
 	case <-ch:
 	}
+	t.Equal(1, count)
 }
