@@ -170,7 +170,7 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 
 func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *pubsub.Message) error {
 	// find producer
-	cc, ok := p.Consumers[opts.ServiceName]
+	cc, ok := p.Producers[opts.ServiceName]
 	if !ok {
 		return fmt.Errorf("no producer config for serviceName: %s", opts.ServiceName)
 	}

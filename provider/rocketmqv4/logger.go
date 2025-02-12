@@ -14,31 +14,31 @@ type apacheLogger struct {
 	logger log.ComponentLogger
 }
 
-func (al apacheLogger) Debug(msg string, fields map[string]interface{}) {
+func (al apacheLogger) Debug(msg string, fields map[string]any) {
 	if al.level.Enabled(zapcore.DebugLevel) {
 		al.logger.Debug(msg, zap.Any("fields", fields))
 	}
 }
 
-func (al apacheLogger) Info(msg string, fields map[string]interface{}) {
+func (al apacheLogger) Info(msg string, fields map[string]any) {
 	if al.level.Enabled(zapcore.InfoLevel) {
 		al.logger.Info(msg, zap.Any("fields", fields))
 	}
 }
 
-func (al apacheLogger) Warning(msg string, fields map[string]interface{}) {
+func (al apacheLogger) Warning(msg string, fields map[string]any) {
 	if al.level.Enabled(zapcore.WarnLevel) {
 		al.logger.Warn(msg, zap.Any("fields", fields))
 	}
 }
 
-func (al apacheLogger) Error(msg string, fields map[string]interface{}) {
+func (al apacheLogger) Error(msg string, fields map[string]any) {
 	if al.level.Enabled(zapcore.ErrorLevel) {
 		al.logger.Error(msg, zap.Any("fields", fields))
 	}
 }
 
-func (al apacheLogger) Fatal(msg string, fields map[string]interface{}) {
+func (al apacheLogger) Fatal(msg string, fields map[string]any) {
 	if al.level.Enabled(zapcore.FatalLevel) {
 		al.logger.Fatal(msg, zap.Any("fields", fields))
 	}
