@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"github.com/woocoos/pubsub"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func (t *testsuite) TearDownSuite() {
 	t.NoError(t.client.Stop(context.Background()))
 }
 
-func (t *testsuite) TestService1() {
+func (t *testsuite) TestPublish() {
 	ch := make(chan *pubsub.Message)
 	count := 0
 	opts := pubsub.HandlerOptions{
@@ -75,4 +76,78 @@ func (t *testsuite) TestService1() {
 	case <-ch:
 	}
 	t.Equal(1, count)
+}
+
+func TestParseEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantList []string
+		wantType string
+	}{
+		{
+			name:     "multiple semicolon separated",
+			input:    "ns1;ns2",
+			wantList: []string{"ns1", "ns2"},
+			wantType: endPointIP,
+		},
+		{
+			name:     "valid domain url",
+			input:    "http://example.com:8080/path",
+			wantList: []string{"http://example.com:8080/path"},
+			wantType: endPointDomain,
+		},
+		{
+			name:     "valid ip address",
+			input:    "192.168.1.1",
+			wantList: []string{"192.168.1.1"},
+			wantType: endPointIP,
+		},
+		{
+			name:  "valid tcp address",
+			input: "localhost:8080",
+			wantList: []string{func() string {
+				ip, _ := net.ResolveTCPAddr("tcp", "localhost:8080")
+				return ip.String()
+			}()},
+			wantType: endPointIP,
+		},
+		{
+			name:     "invalid endpoint",
+			input:    "invalid$endpoint",
+			wantList: []string{"invalid$endpoint"},
+			wantType: endPointIP,
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			wantList: []string{""},
+			wantType: endPointIP,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotList, gotType := parseEndpoint(tt.input)
+			if !equalStringSlice(gotList, tt.wantList) {
+				t.Errorf("parseEndpoint() gotList = %v, want %v", gotList, tt.wantList)
+			}
+			if gotType != tt.wantType {
+				t.Errorf("parseEndpoint() gotType = %v, want %v", gotType, tt.wantType)
+			}
+		})
+	}
+}
+
+// Helper function to compare string slices
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

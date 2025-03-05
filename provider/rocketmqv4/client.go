@@ -14,6 +14,9 @@ import (
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"net"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,9 +129,12 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	case TopicKindTrans:
 		var pd rocketmq.TransactionProducer
 		if !ok {
+			pruOpts := []producer.Option{
+				parseProducerEndpoint(p.ProviderConfig.EndPoint),
+			}
 			pd, err = rocketmq.NewTransactionProducer(
 				newListener(),
-				producer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
+				pruOpts...,
 			)
 			if err != nil {
 				return err
@@ -183,11 +189,13 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 	if !ok {
 		return fmt.Errorf("no consumer config for serviceName: %s", opts.ServiceName)
 	}
-
-	cs, err := rocketmq.NewPushConsumer(consumer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
+	consumerOpts := []consumer.Option{
 		consumer.WithConsumerModel(consumer.Clustering),
 		consumer.WithGroupName(cc.Group),
-		consumer.WithConsumerOrder(cc.Kind == TopicKindOrderly))
+		consumer.WithConsumerOrder(cc.Kind == TopicKindOrderly),
+		parseConsumerEndpoint(p.ProviderConfig.EndPoint),
+	}
+	cs, err := rocketmq.NewPushConsumer(consumerOpts...)
 	if err != nil {
 		return err
 	}
@@ -262,5 +270,50 @@ func (dl *listener) CheckLocalTransaction(msg *primitive.MessageExt) primitive.L
 		return primitive.UnknowState
 	default:
 		return primitive.CommitMessageState
+	}
+}
+
+const (
+	endPointIP     = "ip"
+	endPointDomain = "domain"
+)
+
+func parseEndpoint(endpoint string) ([]string, string) {
+	ns := strings.Split(endpoint, ";")
+	if len(ns) > 1 {
+		return ns, endPointIP
+	}
+	if uri, err := url.Parse(endpoint); err == nil && uri.Host != "" {
+		return []string{endpoint}, endPointDomain
+	}
+	if ip := net.ParseIP(endpoint); ip == nil {
+		addr, err := net.ResolveTCPAddr("tcp", endpoint)
+		if err != nil {
+			return []string{endpoint}, endPointIP
+		} else if addr.IP != nil {
+			return []string{addr.String()}, endPointIP
+		}
+	}
+	return []string{endpoint}, endPointIP
+}
+
+// parseConsumerEndpoint
+func parseConsumerEndpoint(endpoint string) consumer.Option {
+	ns, kind := parseEndpoint(endpoint)
+	switch kind {
+	case endPointDomain:
+		return consumer.WithNameServerDomain(endpoint)
+	default:
+		return consumer.WithNameServer(ns)
+	}
+}
+
+func parseProducerEndpoint(endpoint string) producer.Option {
+	ns, kind := parseEndpoint(endpoint)
+	switch kind {
+	case endPointDomain:
+		return producer.WithNameServerDomain(endpoint)
+	default:
+		return producer.WithNameServer(ns)
 	}
 }
