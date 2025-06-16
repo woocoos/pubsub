@@ -5,8 +5,18 @@ aliyun:
   accessKey: ${accessKey}
   secretKey: ${secretKey}
   maxRecMsgNum: 10
+  log:
+    cores:
+      - level: debug
+        outputPaths:
+          - stdout
   consumers:
     service1:
+      topic: "Trading_Notify"
+      group: "GID_TradingWebNotifyConsumer"
+      messageTag: "*"
+      kind: "orderly"
+    service2:
       topic: "Trading_Notify"
       group: "GID_TradingWebNotifyConsumer"
       messageTag: "*"

@@ -7,13 +7,11 @@ import (
 	"github.com/gogap/errors"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"github.com/tsingsun/woocoo/pkg/gds"
-	"github.com/tsingsun/woocoo/pkg/log"
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
+	"sync"
 	"time"
 )
-
-var logger log.ComponentLogger
 
 const mqTypeName = "rocketmq-aliyun-v4"
 
@@ -39,7 +37,9 @@ type ProviderConfig struct {
 	AccessKey  string
 	SecretKey  string
 	InstanceID string
-	Consumers  map[string]struct {
+	// 消费等待时长
+	ConsumerWaitSeconds int
+	Consumers           map[string]struct {
 		Topic      string
 		Group      string
 		MessageTag string
@@ -71,7 +71,9 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 		client:         mqhttpsdk.NewAliyunMQClient(pc.EndPoint, pc.AccessKey, pc.SecretKey, ""),
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	logger = pubsub.Logger()
+	sync.OnceFunc(func() {
+		logger = newWrapperLogger(cfg.Sub("log"))
+	})()
 	return p, nil
 }
 
@@ -94,7 +96,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 	if !ok {
 		return fmt.Errorf("no consumer config for serviceName: %s", opts.ServiceName)
 	}
-	log.Infof("aliyunmq subscribe topic %s", cc.Topic)
+	logger.Info(fmt.Sprintf("aliyunmq subscribe topic %s", cc.Topic))
 
 	mqConsumer := p.client.GetConsumer(p.InstanceID, cc.Topic, cc.Group, cc.MessageTag)
 	go p.consumeMessages(mqConsumer, cc.Kind, handler)
@@ -116,7 +118,10 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 	endChan := make(chan int)
 	respChan := make(chan mqhttpsdk.ConsumeMessageResponse)
 	errChan := make(chan error)
-
+	seconds := p.ConsumerWaitSeconds
+	if seconds == 0 {
+		seconds = 3
+	}
 	go func() {
 		select {
 		case resp := <-respChan:
@@ -140,17 +145,18 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 			// 消息句柄有时间戳，同一条消息每次消费拿到的都不一样。
 			if err := consumer.AckMessage(handles); err != nil {
 				logger.Error("aliyunmq: ack error", zap.Error(err))
-				time.Sleep(time.Duration(3) * time.Second)
+				time.Sleep(time.Duration(seconds) * time.Second)
 			}
 			endChan <- 1
 		case err := <-errChan:
 			aderr := err.(errors.ErrCode)
 			switch aderr.Code() {
 			case 101:
+				// no message
 				logger.Debug("aliyunmq: no more message", zap.String("message", err.Error()))
-				time.Sleep(time.Duration(3) * time.Second)
 			default:
 				logger.Warn("aliyunmq: message error", zap.Error(err))
+				time.Sleep(time.Duration(seconds) * time.Second)
 			}
 			endChan <- 1
 		case <-time.After(35 * time.Second):
@@ -160,9 +166,9 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 	}()
 
 	if kind == TopicKindOrderly {
-		consumer.ConsumeMessageOrderly(respChan, errChan, 3, 3)
+		consumer.ConsumeMessageOrderly(respChan, errChan, 3, int64(seconds))
 	} else {
-		consumer.ConsumeMessage(respChan, errChan, 3, 3)
+		consumer.ConsumeMessage(respChan, errChan, 3, int64(seconds))
 	}
 
 	<-endChan

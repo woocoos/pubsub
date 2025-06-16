@@ -70,9 +70,30 @@ func (t *testsuite) TestService1() {
 		})
 	t.Require().NoError(err)
 	select {
-	case <-time.After(time.Second * 5):
+	case <-time.After(time.Second * 30):
 		t.Fail("timeout")
 	case <-ch:
 	}
 	t.Equal(1, count)
+}
+
+func (t *testsuite) TestService1_Subs() {
+	ch := make(chan *pubsub.Message)
+	count := 0
+	opts := pubsub.HandlerOptions{
+		ServiceName: "service2",
+		JSON:        true,
+		Handler: func(ctx context.Context, message *customer, msg *pubsub.Message) error {
+			count++
+			ch <- msg
+			return nil
+		},
+	}
+	t.Require().NoError(t.client.On(opts))
+	select {
+	case <-time.After(time.Second * 30):
+		t.Fail("timeout")
+	case <-ch:
+	}
+	t.Equal(0, count)
 }

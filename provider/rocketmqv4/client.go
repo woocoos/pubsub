@@ -13,7 +13,6 @@ import (
 	"github.com/tsingsun/woocoo/pkg/log"
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"net"
 	"net/url"
 	"strings"
@@ -46,7 +45,6 @@ type ProviderConfig struct {
 	AccessKey  string
 	SecretKey  string
 	InstanceID string
-	LogLevel   string
 	Consumers  map[string]struct {
 		Topic      string
 		Group      string
@@ -80,14 +78,8 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	sync.OnceFunc(func() {
-		ll, err := zapcore.ParseLevel(pc.LogLevel)
-		if err != nil {
-			panic(err)
-		}
-		rlog.SetLogger(&apacheLogger{
-			level:  ll,
-			logger: pubsub.Logger(),
-		})
+		logger = newApacheLogger(cfg.Sub("log"))
+		rlog.SetLogger(logger)
 	})()
 	return p, nil
 }
@@ -111,7 +103,7 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	if !ok {
 		return fmt.Errorf("no producer config for serviceName: %s", opts.ServiceName)
 	}
-	logger.Info(fmt.Sprintf("%s publish topic %s", p.GetMQType(), pc.Topic))
+	rlog.Info(fmt.Sprintf("rocketmq publish topic %s", pc.Topic), nil)
 
 	msg := primitive.NewMessage(pc.Topic, m.Data)
 
@@ -213,7 +205,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 					PublishTime: gds.Ptr(time.UnixMilli(v.BornTimestamp)),
 				}
 				if err := handler(context.Background(), &msg); err != nil {
-					logger.Error("messageHandler error", zap.Any("entity", v), zap.Error(err))
+					logger.logger.Error("messageHandler error", zap.Any("entity", v), zap.Error(err))
 				}
 			}
 			return consumer.ConsumeSuccess, nil
