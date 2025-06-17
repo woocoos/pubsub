@@ -34,7 +34,8 @@ func (t *testsuite) SetupSuite() {
 	var err error
 	t.client, err = pubsub.New(cfg.Sub("aliyun"))
 	t.Require().NoError(err)
-
+	t.provider = t.client.Provider.(*Provider)
+	t.Require().Equal(10, t.provider.MaxRecMsgNum)
 	time.Sleep(time.Second * 2)
 }
 

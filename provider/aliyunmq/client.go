@@ -32,14 +32,17 @@ const (
 	TopicKindTrans TopicKind = "trans"
 )
 
+// ProviderConfig 配置
 type ProviderConfig struct {
 	EndPoint   string
 	AccessKey  string
 	SecretKey  string
 	InstanceID string
-	// 消费等待时长
+	// 消费等待时长,默认3秒
 	ConsumerWaitSeconds int
-	Consumers           map[string]struct {
+	// 单次消费消息数量, 默认3
+	MaxRecMsgNum int
+	Consumers    map[string]struct {
 		Topic      string
 		Group      string
 		MessageTag string
@@ -52,6 +55,7 @@ type ProviderConfig struct {
 	}
 }
 
+// Provider 消息队列实现
 type Provider struct {
 	ProviderConfig
 	client mqhttpsdk.MQClient
@@ -61,7 +65,10 @@ type Provider struct {
 
 // New create a new aliyunmq provider
 func New(cfg *conf.Configuration) (pubsub.Provider, error) {
-	var pc ProviderConfig
+	var pc = ProviderConfig{
+		MaxRecMsgNum:        3,
+		ConsumerWaitSeconds: 3,
+	}
 	err := cfg.Unmarshal(&pc)
 	if err != nil {
 		return nil, err
@@ -122,6 +129,9 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 	if seconds == 0 {
 		seconds = 3
 	}
+	if p.MaxRecMsgNum == 0 {
+		p.MaxRecMsgNum = 3
+	}
 	go func() {
 		select {
 		case resp := <-respChan:
@@ -166,9 +176,9 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 	}()
 
 	if kind == TopicKindOrderly {
-		consumer.ConsumeMessageOrderly(respChan, errChan, 3, int64(seconds))
+		consumer.ConsumeMessageOrderly(respChan, errChan, int32(p.MaxRecMsgNum), int64(seconds))
 	} else {
-		consumer.ConsumeMessage(respChan, errChan, 3, int64(seconds))
+		consumer.ConsumeMessage(respChan, errChan, int32(p.MaxRecMsgNum), int64(seconds))
 	}
 
 	<-endChan
