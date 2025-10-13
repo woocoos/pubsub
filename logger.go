@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"fmt"
+
 	"github.com/tsingsun/woocoo/pkg/log"
 	"go.uber.org/zap"
 )
@@ -38,7 +39,7 @@ func (o LoggerMiddleware) SubscribeInterceptor(opts *HandlerOptions, next Messag
 		} else {
 			o.Logger.Debug(fmt.Sprintf("success processing subscriber, serviceName:%s,msg:%s", opts.ServiceName, m.ID))
 		}
-		return nil
+		return err
 	}
 }
 

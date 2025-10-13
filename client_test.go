@@ -2,13 +2,26 @@ package pubsub
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tsingsun/woocoo/pkg/log"
 )
 
 // MockProvider 模拟 Provider 接口
 type MockProvider struct {
+	wg         sync.WaitGroup
+	consumer   chan string
+	handlerErr error
+}
+
+func NewMockProvider() *MockProvider {
+	return &MockProvider{
+		consumer: make(chan string),
+	}
 }
 
 func (mp *MockProvider) Start(ctx context.Context) error {
@@ -32,13 +45,37 @@ func (mp *MockProvider) Publish(ctx context.Context, opts PublishOptions, m *Mes
 }
 
 func (mp *MockProvider) Subscribe(opts HandlerOptions, handler MessageHandler) error {
-	return handler(context.Background(), &Message{})
+	go func() {
+		for {
+			select {
+			case msg := <-mp.consumer:
+				func() {
+					defer mp.wg.Done()
+					err := handler(context.Background(), &Message{
+						Data: []byte(msg),
+					})
+					if err != nil {
+						mp.handlerErr = err
+					}
+				}()
+			}
+		}
+	}()
+	return nil
 }
 
-func TestOnRawdw(t *testing.T) {
+func (mp *MockProvider) SendReceiveMessage(sig string) {
+	select {
+	case mp.consumer <- sig:
+	case <-time.After(time.Second):
+		log.Error("SendReceiveMessage:timeout")
+	}
+}
+
+func TestOnRaw(t *testing.T) {
 	t.Run("missHandler", func(t *testing.T) {
 		client := &Client{
-			Provider: &MockProvider{},
+			Provider: NewMockProvider(),
 		}
 
 		opts := HandlerOptions{
@@ -51,7 +88,7 @@ func TestOnRawdw(t *testing.T) {
 	})
 	t.Run("not messageHandler", func(t *testing.T) {
 		client := &Client{
-			Provider: &MockProvider{},
+			Provider: NewMockProvider(),
 		}
 
 		opts := HandlerOptions{
@@ -64,7 +101,7 @@ func TestOnRawdw(t *testing.T) {
 	})
 	t.Run("ok", func(t *testing.T) {
 		client := &Client{
-			Provider: &MockProvider{},
+			Provider: NewMockProvider(),
 		}
 		cb := func(ctx context.Context, m *Message) error {
 			return nil
@@ -74,5 +111,30 @@ func TestOnRawdw(t *testing.T) {
 		}
 		err := client.OnRaw(opts)
 		assert.NoError(t, err)
+	})
+	t.Run("panic", func(t *testing.T) {
+		provider := NewMockProvider()
+		client := &Client{
+			Provider:   provider,
+			Middleware: defaults,
+		}
+		provider.wg.Add(1)
+		cb := func(ctx context.Context, m *Message) error {
+			panic(string(m.Data))
+		}
+		opts := HandlerOptions{
+			Handler: cb,
+		}
+
+		err := client.OnRaw(opts)
+		require.NoError(t, err)
+
+		provider.wg.Add(1)
+		go func() {
+			provider.wg.Done()
+			provider.SendReceiveMessage("panic")
+		}()
+		provider.wg.Wait()
+		assert.Error(t, provider.handlerErr)
 	})
 }

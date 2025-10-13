@@ -3,14 +3,15 @@ package aliyunmq
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	mqhttpsdk "github.com/aliyunmq/mq-http-go-sdk"
 	"github.com/gogap/errors"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"github.com/tsingsun/woocoo/pkg/gds"
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 const mqTypeName = "rocketmq-aliyun-v4"
@@ -63,6 +64,8 @@ type Provider struct {
 	cancel context.CancelFunc
 }
 
+var loggerInit sync.Once
+
 // New create a new aliyunmq provider
 func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 	var pc = ProviderConfig{
@@ -78,9 +81,9 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 		client:         mqhttpsdk.NewAliyunMQClient(pc.EndPoint, pc.AccessKey, pc.SecretKey, ""),
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	sync.OnceFunc(func() {
+	loggerInit.Do(func() {
 		logger = newWrapperLogger(cfg.Sub("log"))
-	})()
+	})
 	return p, nil
 }
 
