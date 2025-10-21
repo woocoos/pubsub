@@ -3,6 +3,13 @@ package rocketmqv4
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
@@ -13,12 +20,6 @@ import (
 	"github.com/tsingsun/woocoo/pkg/log"
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
-	"net"
-	"net/url"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const mqTypeName = "rocketmq-v4"
@@ -45,7 +46,9 @@ type ProviderConfig struct {
 	AccessKey  string
 	SecretKey  string
 	InstanceID string
-	Consumers  map[string]struct {
+	// 单次消费消息数量, 默认1
+	MaxRecMsgNum int
+	Consumers    map[string]struct {
 		Topic      string
 		Group      string
 		MessageTag string
@@ -67,7 +70,9 @@ type Provider struct {
 }
 
 func New(cfg *conf.Configuration) (pubsub.Provider, error) {
-	var pc ProviderConfig
+	pc := ProviderConfig{
+		MaxRecMsgNum: 1,
+	}
 	err := cfg.Unmarshal(&pc)
 	if err != nil {
 		return nil, err
@@ -77,10 +82,16 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 		producers:      make(map[string]any),
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	sync.OnceFunc(func() {
-		logger = newApacheLogger(cfg.Sub("log"))
-		rlog.SetLogger(logger)
-	})()
+	if cfg.IsSet("log") {
+		sync.OnceFunc(func() {
+			logger = newApacheLogger(cfg.Sub("log"))
+			rlog.SetLogger(logger)
+		})()
+	} else {
+		logger = &apacheLogger{
+			logger: log.Global().Logger(),
+		}
+	}
 	return p, nil
 }
 
@@ -88,8 +99,11 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop consumers and producers.
 func (p *Provider) Stop(ctx context.Context) error {
 	p.cancel()
+	// leaves to UnCommit
+	time.Sleep(time.Second)
 	return nil
 }
 
@@ -108,11 +122,17 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	msg := primitive.NewMessage(pc.Topic, m.Data)
 
 	if opts.Metadata != nil {
-		if v, ok := opts.Metadata["key"]; ok {
-			msg.WithKeys([]string{v})
+		key, ok := opts.Metadata["key"]
+		if ok {
+			msg.WithKeys([]string{key})
 		}
 		if v, ok := opts.Metadata["tag"]; ok {
 			msg.WithTag(v)
+		}
+		if v, ok := opts.Metadata["shardingKey"]; ok {
+			msg.WithShardingKey(v)
+		} else if key != "" {
+			msg.WithShardingKey(key)
 		}
 	}
 
@@ -123,6 +143,7 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 		if !ok {
 			pruOpts := []producer.Option{
 				parseProducerEndpoint(p.ProviderConfig.EndPoint),
+				producer.WithQueueSelector(producer.NewHashQueueSelector()),
 			}
 			pd, err = rocketmq.NewTransactionProducer(
 				newListener(),
@@ -151,7 +172,10 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	default:
 		var pd rocketmq.Producer
 		if !ok {
-			pd, err = rocketmq.NewProducer(producer.WithNameServer([]string{p.ProviderConfig.EndPoint}))
+			pd, err = rocketmq.NewProducer(
+				producer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
+				producer.WithQueueSelector(producer.NewHashQueueSelector()),
+			)
 			if err != nil {
 				return err
 			}
@@ -185,6 +209,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 		consumer.WithConsumerModel(consumer.Clustering),
 		consumer.WithGroupName(cc.Group),
 		consumer.WithConsumerOrder(cc.Kind == TopicKindOrderly),
+		consumer.WithConsumeMessageBatchMaxSize(p.MaxRecMsgNum),
 		parseConsumerEndpoint(p.ProviderConfig.EndPoint),
 	}
 	cs, err := rocketmq.NewPushConsumer(consumerOpts...)
@@ -194,6 +219,7 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 	err = cs.Subscribe(cc.Topic,
 		consumer.MessageSelector{Type: consumer.TAG, Expression: cc.MessageTag},
 		func(ctx context.Context, ext ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+			log.Println(ext)
 			for _, v := range ext {
 				msg := pubsub.Message{
 					Data: v.Body,

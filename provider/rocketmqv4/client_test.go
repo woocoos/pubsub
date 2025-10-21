@@ -2,13 +2,15 @@ package rocketmqv4
 
 import (
 	"context"
-	"github.com/stretchr/testify/suite"
-	"github.com/tsingsun/woocoo/pkg/conf"
-	"github.com/woocoos/pubsub"
+	"fmt"
 	"net"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/suite"
+	"github.com/tsingsun/woocoo/pkg/conf"
+	"github.com/woocoos/pubsub"
 )
 
 type customer struct {
@@ -45,12 +47,10 @@ func (t *testsuite) TearDownSuite() {
 
 func (t *testsuite) TestPublish() {
 	ch := make(chan *pubsub.Message)
-	count := 0
 	opts := pubsub.HandlerOptions{
 		ServiceName: "service1",
 		JSON:        true,
 		Handler: func(ctx context.Context, message *customer, msg *pubsub.Message) error {
-			count++
 			ch <- msg
 			return nil
 		},
@@ -61,21 +61,54 @@ func (t *testsuite) TestPublish() {
 			ServiceName: "service1",
 			JSON:        true,
 			Metadata: map[string]string{
-				"tag": "test",
-				"key": "1",
+				"tag":         "test",
+				"key":         "useSameKeyToOrderly",
+				"shardingKey": "useSameKeyToOrderly",
 			},
 		},
 		customer{
 			ID:   "1",
-			Name: "test",
+			Name: "test1",
 		})
 	t.Require().NoError(err)
-	select {
-	case <-time.After(time.Second * 5):
-		t.Fail("timeout")
-	case <-ch:
+	err = t.client.Publish(context.Background(),
+		pubsub.PublishOptions{
+			ServiceName: "service1",
+			JSON:        true,
+			Metadata: map[string]string{
+				"tag":         "test",
+				"key":         "useSameKeyToOrderly",
+				"shardingKey": "useSameKeyToOrderly",
+			},
+		},
+		customer{
+			ID:   "2",
+			Name: "test2",
+		})
+	t.Require().NoError(err)
+	count := 0
+	tm := time.NewTimer(time.Second * 5)
+	for {
+		select {
+		case <-tm.C:
+			// wait for message ack
+			t.Equal(2, count)
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch count {
+			case 0:
+				t.Contains(string(msg.Data), `"1"`)
+			case 1:
+				t.Contains(string(msg.Data), `"2"`)
+			}
+			t.T().Log(fmt.Sprintf("count:%d", count), msg)
+			count++
+		}
 	}
-	t.Equal(1, count)
+	// wait for message ack
 }
 
 func TestParseEndpoint(t *testing.T) {

@@ -3,12 +3,12 @@ rocketmq-v4:
   endPoint: "127.0.0.1:9876"
   consumers:
     service1:
-      topic: "Trading_Notify"
-      group: "GID_TradingWebNotifyConsumer"
+      topic: "TestTopic"
+      group: "TestConsumer"
       messageTag: "*"
       kind: "orderly"
   producers:
     service1:
-      topic: "Trading_Notify"
+      topic: "TestTopic"
       kind: "orderly"
-      group: "GID_SBL_Producer"
+      group: "TestProducer"
