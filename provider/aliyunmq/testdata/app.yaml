@@ -4,7 +4,6 @@ aliyun:
   instanceId: ${instanceId}
   accessKey: ${accessKey}
   secretKey: ${secretKey}
-  maxRecMsgNum: 10
   log:
     cores:
       - level: debug
@@ -16,6 +15,7 @@ aliyun:
       group: "GID_TradingWebNotifyConsumer"
       messageTag: "*"
       kind: "orderly"
+      consumeMessageBatchMaxSize: 10
     service2:
       topic: "Trading_Notify"
       group: "GID_TradingWebNotifyConsumer"

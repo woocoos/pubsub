@@ -46,19 +46,29 @@ type ProviderConfig struct {
 	AccessKey  string
 	SecretKey  string
 	InstanceID string
-	// 单次消费消息数量, 默认1
-	MaxRecMsgNum int
-	Consumers    map[string]struct {
-		Topic      string
-		Group      string
-		MessageTag string
-		Kind       TopicKind
-	}
-	Producers map[string]struct {
-		Topic string
-		Group string
-		Kind  TopicKind
-	}
+	Consumers  map[string]ConsumerConfig
+	Producers  map[string]ProducerConfig
+}
+
+type ConsumerConfig struct {
+	Topic      string
+	Group      string
+	MessageTag string
+	Kind       TopicKind
+	// ConsumeMessageBatchMaxSize 单次消费消息数量, 默认以顺序消费合理值1为默认值
+	ConsumeMessageBatchMaxSize int
+	// MaxReconsumeTimes 最大重试次数,对于顺序消费，其为本地重试次数
+	MaxReconsumeTimes int
+	// SuspendCurrentQueueTimeMillis 消息消费失败后再次被投递给Consumer消费的间隔时间，只在顺序消费中起作用
+	// 需要注意的 实际消息次数 = 第一次 + MaxReconsumeTimes + 1, 最后一次暂时不确定
+	SuspendCurrentQueueTimeMillis time.Duration
+}
+
+type ProducerConfig struct {
+	Topic      string
+	Group      string
+	Kind       TopicKind
+	RetryTimes int
 }
 
 type Provider struct {
@@ -70,9 +80,7 @@ type Provider struct {
 }
 
 func New(cfg *conf.Configuration) (pubsub.Provider, error) {
-	pc := ProviderConfig{
-		MaxRecMsgNum: 1,
-	}
+	pc := ProviderConfig{}
 	err := cfg.Unmarshal(&pc)
 	if err != nil {
 		return nil, err
@@ -122,11 +130,11 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	msg := primitive.NewMessage(pc.Topic, m.Data)
 
 	if opts.Metadata != nil {
-		key, ok := opts.Metadata["key"]
+		key, ok := opts.Metadata[pubsub.FieldKey]
 		if ok {
 			msg.WithKeys([]string{key})
 		}
-		if v, ok := opts.Metadata["tag"]; ok {
+		if v, ok := opts.Metadata[pubsub.FieldTag]; ok {
 			msg.WithTag(v)
 		}
 	}
@@ -136,13 +144,9 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	case TopicKindTrans:
 		var pd rocketmq.TransactionProducer
 		if !ok {
-			pruOpts := []producer.Option{
-				parseProducerEndpoint(p.ProviderConfig.EndPoint),
-				producer.WithQueueSelector(producer.NewHashQueueSelector()),
-			}
 			pd, err = rocketmq.NewTransactionProducer(
 				newListener(),
-				pruOpts...,
+				p.initBaseProducerOptions(pc)...,
 			)
 			if err != nil {
 				return err
@@ -165,7 +169,7 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 
 		// TODO SendInTransaction
 	case TopicKindOrderly:
-		if v, ok := opts.Metadata["shardingKey"]; ok {
+		if v, ok := opts.Metadata[pubsub.FieldShardingKey]; ok {
 			msg.WithShardingKey(v)
 		} else {
 			msg.WithShardingKey(msg.GetKeys())
@@ -175,8 +179,7 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 		var pd rocketmq.Producer
 		if !ok {
 			pd, err = rocketmq.NewProducer(
-				producer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
-				producer.WithQueueSelector(producer.NewHashQueueSelector()),
+				p.initBaseProducerOptions(pc)...,
 			)
 			if err != nil {
 				return err
@@ -201,6 +204,17 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	return
 }
 
+func (p *Provider) initBaseProducerOptions(pc ProducerConfig) []producer.Option {
+	opts := []producer.Option{
+		producer.WithNameServer([]string{p.ProviderConfig.EndPoint}),
+		producer.WithQueueSelector(producer.NewHashQueueSelector()),
+	}
+	if pc.RetryTimes > 0 {
+		opts = append(opts, producer.WithRetry(pc.RetryTimes))
+	}
+	return opts
+}
+
 func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageHandler) error {
 	// find consumer
 	cc, ok := p.Consumers[opts.ServiceName]
@@ -211,29 +225,42 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 		consumer.WithConsumerModel(consumer.Clustering),
 		consumer.WithGroupName(cc.Group),
 		consumer.WithConsumerOrder(cc.Kind == TopicKindOrderly),
-		consumer.WithConsumeMessageBatchMaxSize(p.MaxRecMsgNum),
 		parseConsumerEndpoint(p.ProviderConfig.EndPoint),
 	}
+	if cc.MaxReconsumeTimes > 0 {
+		consumerOpts = append(consumerOpts, consumer.WithMaxReconsumeTimes(int32(cc.MaxReconsumeTimes)))
+	}
+	if cc.ConsumeMessageBatchMaxSize > 0 {
+		consumerOpts = append(consumerOpts, consumer.WithConsumeMessageBatchMaxSize(cc.ConsumeMessageBatchMaxSize))
+	}
+	if cc.Kind == TopicKindOrderly && cc.SuspendCurrentQueueTimeMillis > 0 {
+		consumerOpts = append(consumerOpts, consumer.WithSuspendCurrentQueueTimeMillis(cc.SuspendCurrentQueueTimeMillis))
+	}
+
 	cs, err := rocketmq.NewPushConsumer(consumerOpts...)
 	if err != nil {
 		return err
 	}
-	err = cs.Subscribe(cc.Topic,
-		consumer.MessageSelector{Type: consumer.TAG, Expression: cc.MessageTag},
+	err = cs.Subscribe(cc.Topic, consumer.MessageSelector{Type: consumer.TAG, Expression: cc.MessageTag},
 		func(ctx context.Context, ext ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-			log.Println(ext)
 			for _, v := range ext {
 				msg := pubsub.Message{
 					Data: v.Body,
 					ID:   v.MsgId,
 					Metadata: map[string]string{
-						"key": v.GetKeys(),
-						"tag": v.GetTags(),
+						pubsub.FieldKey: v.GetKeys(),
+						pubsub.FieldTag: v.GetTags(),
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.BornTimestamp)),
 				}
 				if err := handler(context.Background(), &msg); err != nil {
 					logger.logger.Error("messageHandler error", zap.Any("entity", v), zap.Error(err))
+					// 顺序消费时需暂停当前队列重试
+					if cc.Kind == TopicKindOrderly {
+						return consumer.SuspendCurrentQueueAMoment, nil
+					} else if cc.MaxReconsumeTimes > 0 {
+						return consumer.ConsumeRetryLater, nil
+					}
 				}
 			}
 			return consumer.ConsumeSuccess, nil

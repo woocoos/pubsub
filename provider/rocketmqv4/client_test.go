@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogap/errors"
 	"github.com/stretchr/testify/suite"
 	"github.com/tsingsun/woocoo/pkg/conf"
+	"github.com/tsingsun/woocoo/pkg/gds"
 	"github.com/woocoos/pubsub"
 )
 
@@ -87,7 +89,7 @@ func (t *testsuite) TestPublish() {
 		})
 	t.Require().NoError(err)
 	count := 0
-	tm := time.NewTimer(time.Second * 5)
+	tm := time.NewTimer(time.Second * 10)
 	for {
 		select {
 		case <-tm.C:
@@ -109,6 +111,108 @@ func (t *testsuite) TestPublish() {
 		}
 	}
 	// wait for message ack
+}
+
+func (t *testsuite) TestRetryCommonConsume() {
+	ch := make(chan *pubsub.Message)
+
+	key := gds.RandomString(16)
+	opts := pubsub.HandlerOptions{
+		ServiceName: "service2",
+		JSON:        true,
+		Handler: func(ctx context.Context, message *customer, msg *pubsub.Message) error {
+			if msg.Metadata["key"] != key {
+				return nil
+			}
+			ch <- msg
+			return errors.New("make error")
+		},
+	}
+	t.Require().NoError(t.client.On(opts))
+	time.Sleep(time.Second * 2)
+	err := t.client.Publish(context.Background(),
+		pubsub.PublishOptions{
+			ServiceName: "service1",
+			JSON:        true,
+			Metadata: map[string]string{
+				"tag":         "retry",
+				"key":         key,
+				"shardingKey": "TestRetryConsume",
+			},
+		},
+		customer{
+			ID:   "1",
+			Name: "test1",
+		})
+	t.Require().NoError(err)
+	count := 0
+	// mq的重试机制 10秒,30秒
+	tm := time.NewTimer(time.Second * 60)
+	for {
+		select {
+		case <-tm.C:
+			// wait for message ack, 1+ retry times 2
+			t.Equal(3, count)
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			t.T().Log(fmt.Sprintf("count:%d", count), msg)
+			count++
+		}
+	}
+}
+
+func (t *testsuite) TestRetryOrderlyConsume() {
+	ch := make(chan *pubsub.Message)
+
+	key := gds.RandomString(16)
+	opts := pubsub.HandlerOptions{
+		ServiceName: "service3",
+		JSON:        true,
+		Handler: func(ctx context.Context, message *customer, msg *pubsub.Message) error {
+			if msg.Metadata["key"] != key {
+				return nil
+			}
+			ch <- msg
+			return errors.New("make error")
+		},
+	}
+	t.Require().NoError(t.client.On(opts))
+	time.Sleep(time.Second * 2)
+	err := t.client.Publish(context.Background(),
+		pubsub.PublishOptions{
+			ServiceName: "service1",
+			JSON:        true,
+			Metadata: map[string]string{
+				"tag":         "orderlyretry",
+				"key":         key,
+				"shardingKey": "TestRetryConsume",
+			},
+		},
+		customer{
+			ID:   "1",
+			Name: "test1",
+		})
+	t.Require().NoError(err)
+	count := 0
+	// mq的重试机制 10秒,30秒
+	tm := time.NewTimer(time.Second * 60)
+	for {
+		select {
+		case <-tm.C:
+			// wait for message ack, 1+ retry times 3 + 1(reconsume)
+			t.Equal(6, count)
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			t.T().Log(fmt.Sprintf("count:%d", count), msg)
+			count++
+		}
+	}
 }
 
 func TestParseEndpoint(t *testing.T) {

@@ -41,19 +41,25 @@ type ProviderConfig struct {
 	InstanceID string
 	// 消费等待时长,默认3秒
 	ConsumerWaitSeconds int
+	Consumers           map[string]ConsumerConfig
+	Producers           map[string]ProducerConfig
+}
+
+type ConsumerConfig struct {
+	Topic             string
+	Group             string
+	MessageTag        string
+	Kind              TopicKind
+	MaxReconsumeTimes int
 	// 单次消费消息数量, 默认3
-	MaxRecMsgNum int
-	Consumers    map[string]struct {
-		Topic      string
-		Group      string
-		MessageTag string
-		Kind       TopicKind
-	}
-	Producers map[string]struct {
-		Topic string
-		Group string
-		Kind  TopicKind
-	}
+	ConsumeMessageBatchMaxSize int
+}
+
+type ProducerConfig struct {
+	Topic      string
+	Group      string
+	Kind       TopicKind
+	RetryTimes int
 }
 
 // Provider 消息队列实现
@@ -69,7 +75,6 @@ var loggerInit sync.Once
 // New create a new aliyunmq provider
 func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 	var pc = ProviderConfig{
-		MaxRecMsgNum:        3,
 		ConsumerWaitSeconds: 3,
 	}
 	err := cfg.Unmarshal(&pc)
@@ -100,6 +105,8 @@ func (p *Provider) GetMQType() string {
 	return mqTypeName
 }
 
+// Subscribe 消费订阅
+// 注意: 阿里云目前不支持消费失败重试,因此在消费端需要处理消费失效后继处理
 func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageHandler) error {
 	// find consumer
 	cc, ok := p.Consumers[opts.ServiceName]
@@ -109,22 +116,22 @@ func (p *Provider) Subscribe(opts pubsub.HandlerOptions, handler pubsub.MessageH
 	logger.Info(fmt.Sprintf("aliyunmq subscribe topic %s", cc.Topic))
 
 	mqConsumer := p.client.GetConsumer(p.InstanceID, cc.Topic, cc.Group, cc.MessageTag)
-	go p.consumeMessages(mqConsumer, cc.Kind, handler)
+	go p.consumeMessages(mqConsumer, &cc, handler)
 	return nil
 }
 
-func (p *Provider) consumeMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind, handler pubsub.MessageHandler) {
+func (p *Provider) consumeMessages(consumer mqhttpsdk.MQConsumer, config *ConsumerConfig, handler pubsub.MessageHandler) {
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		default:
-			p.processMessages(consumer, kind, handler)
+			p.processMessages(consumer, config, handler)
 		}
 	}
 }
 
-func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind, handler pubsub.MessageHandler) {
+func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, config *ConsumerConfig, handler pubsub.MessageHandler) {
 	endChan := make(chan int)
 	respChan := make(chan mqhttpsdk.ConsumeMessageResponse)
 	errChan := make(chan error)
@@ -132,8 +139,8 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 	if seconds == 0 {
 		seconds = 3
 	}
-	if p.MaxRecMsgNum == 0 {
-		p.MaxRecMsgNum = 3
+	if config.ConsumeMessageBatchMaxSize == 0 {
+		config.ConsumeMessageBatchMaxSize = 3
 	}
 	go func() {
 		select {
@@ -144,15 +151,21 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 					ID:   v.MessageId,
 					Data: []byte(v.MessageBody),
 					Metadata: map[string]string{
-						"key": v.MessageKey,
-						"tag": v.MessageTag,
+						pubsub.FieldKey: v.MessageKey,
+						pubsub.FieldTag: v.MessageTag,
 					},
 					PublishTime: gds.Ptr(time.UnixMilli(v.PublishTime)),
 				}
+				// 大于重试次数则直接丢弃,这点与死信队列处理不同,由日志承担
 				if err := handler(context.Background(), &msg); err != nil {
-					logger.Error("aliyunmq: messageHandler error", zap.Any("entity", v), zap.Error(err))
+					if v.ConsumedTimes > int64(config.MaxReconsumeTimes) {
+						handles = append(handles, v.ReceiptHandle)
+					} else {
+						logger.Error("aliyunmq: messageHandler error", zap.Int64("retry", v.ConsumedTimes), zap.Any("entity", v), zap.Error(err))
+					}
+				} else {
+					handles = append(handles, v.ReceiptHandle)
 				}
-				handles = append(handles, v.ReceiptHandle)
 			}
 			// NextConsumeTime前若不确认消息消费成功，则消息会被重复消费。
 			// 消息句柄有时间戳，同一条消息每次消费拿到的都不一样。
@@ -178,10 +191,10 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, kind TopicKind
 		}
 	}()
 
-	if kind == TopicKindOrderly {
-		consumer.ConsumeMessageOrderly(respChan, errChan, int32(p.MaxRecMsgNum), int64(seconds))
+	if config.Kind == TopicKindOrderly {
+		consumer.ConsumeMessageOrderly(respChan, errChan, int32(config.ConsumeMessageBatchMaxSize), int64(seconds))
 	} else {
-		consumer.ConsumeMessage(respChan, errChan, int32(p.MaxRecMsgNum), int64(seconds))
+		consumer.ConsumeMessage(respChan, errChan, int32(config.ConsumeMessageBatchMaxSize), int64(seconds))
 	}
 
 	<-endChan
@@ -195,15 +208,15 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	}
 	req := mqhttpsdk.PublishMessageRequest{
 		MessageBody: string(m.Data),
-		MessageTag:  opts.Metadata["tag"],
-		MessageKey:  opts.Metadata["key"],
+		MessageTag:  opts.Metadata[pubsub.FieldTag],
+		MessageKey:  opts.Metadata[pubsub.FieldKey],
 	}
 
 	var producer mqhttpsdk.MQProducer
 	switch cc.Kind {
 	case TopicKindOrderly:
 		producer = p.client.GetTransProducer(p.InstanceID, cc.Topic, cc.Group)
-		req.ShardingKey = opts.Metadata["shardingKey"]
+		req.ShardingKey = opts.Metadata[pubsub.FieldShardingKey]
 		if req.ShardingKey == "" {
 			req.ShardingKey = req.MessageKey
 		}

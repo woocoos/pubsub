@@ -5,10 +5,26 @@ rocketmq-v4:
     service1:
       topic: "TestTopic"
       group: "TestConsumer"
-      messageTag: "*"
+      messageTag: "test"
       kind: "orderly"
+    service2:
+      topic: "TestTopic"
+      group: "TestConsumer1"
+      messageTag: "retry"
+#     10s,30s,1m,此后每次重试的时间间隔是上一次的 2 倍
+      maxReconsumeTimes: 2
+    service3:
+      topic: "TestTopic"
+      group: "TestConsumer2"
+      messageTag: "orderlyretry"
+      kind: "orderly"
+#      需要注意的 实践中实际消息次数 maxReconsumeTimes+2
+      maxReconsumeTimes: 3
+      consumeMessageBatchMaxSize: 1
+#      suspendCurrentQueueTimeMillis: 3s
   producers:
     service1:
       topic: "TestTopic"
       kind: "orderly"
       group: "TestProducer"
+      maxReconsumeTimes: 1
