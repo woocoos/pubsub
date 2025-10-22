@@ -13,16 +13,25 @@ aliyun:
     service1:
       topic: "Trading_Notify"
       group: "GID_TradingWebNotifyConsumer"
-      messageTag: "*"
+      messageTag: "orderly"
       kind: "orderly"
-      consumeMessageBatchMaxSize: 10
+      consumeMessageBatchMaxSize: 3
+      maxReconsumeTimes: 1
+      consumerWaitSeconds: 5
     service2:
       topic: "Trading_Notify"
-      group: "GID_TradingWebNotifyConsumer"
-      messageTag: "*"
-      kind: "orderly"
+      group: "GID_CommonConsumer"
+      messageTag: "common"
+    service3:
+      topic: "Trading_Notify"
+      group: "GID_CommonConsumer"
+      messageTag: "commonRetry"
+      maxReconsumeTimes: 1
   producers:
     service1:
       topic: "Trading_Notify"
       kind: "orderly"
       group: "GID_SBL_Producer"
+    service2:
+      topic: "Trading_Notify"
+      group: "GID_CommonConsumer"

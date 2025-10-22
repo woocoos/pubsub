@@ -11,7 +11,7 @@ rocketmq-v4:
       topic: "TestTopic"
       group: "TestConsumer1"
       messageTag: "retry"
-#     10s,30s,1m,此后每次重试的时间间隔是上一次的 2 倍
+#     最多16次, 10s,30s,1m,此后每次重试的时间间隔是上一次的 2 倍
       maxReconsumeTimes: 2
     service3:
       topic: "TestTopic"

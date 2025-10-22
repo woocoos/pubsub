@@ -10,6 +10,7 @@ import (
 	"github.com/gogap/errors"
 	"github.com/tsingsun/woocoo/pkg/conf"
 	"github.com/tsingsun/woocoo/pkg/gds"
+	"github.com/tsingsun/woocoo/pkg/log"
 	"github.com/woocoos/pubsub"
 	"go.uber.org/zap"
 )
@@ -62,7 +63,13 @@ type ProducerConfig struct {
 	RetryTimes int
 }
 
-// Provider 消息队列实现
+// Provider 阿里云消息队列实现
+// 关于重试次数(MaxReconsumeTimes): 阿里云不支持重试参数,该参数为客户端作用.
+// 如果不设置重试次数则以阿里云的规则:
+// HTTP协议下云消息队列 RocketMQ 版的消息重试机制为：无序消息每隔5分钟重试一次，顺序消息每隔1分钟重试一次，最多重试288次。
+// 如果设置重试次数,则超过重试次数后将向阿里云发送ACK确认消费成功,此时需要自行处理错误的消息.
+// 阿里云顺序消费,支持ACK后面的消息,但消息拉取时会拉取失败点位后续的消息, 即ACK后续消息是无效的,并不会减少拉取的消息
+// 因此对于顺序消费,需要依赖系统日志做补充且业务系统需要足够强的健壮性.
 type Provider struct {
 	ProviderConfig
 	client mqhttpsdk.MQClient
@@ -86,9 +93,15 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 		client:         mqhttpsdk.NewAliyunMQClient(pc.EndPoint, pc.AccessKey, pc.SecretKey, ""),
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	loggerInit.Do(func() {
-		logger = newWrapperLogger(cfg.Sub("log"))
-	})
+	if cfg.IsSet("log") {
+		loggerInit.Do(func() {
+			logger = newWrapperLogger(cfg.Sub("log"))
+		})
+	} else {
+		logger = &logWrapper{
+			logger: log.Global().Logger(),
+		}
+	}
 	return p, nil
 }
 
@@ -158,14 +171,19 @@ func (p *Provider) processMessages(consumer mqhttpsdk.MQConsumer, config *Consum
 				}
 				// 大于重试次数则直接丢弃,这点与死信队列处理不同,由日志承担
 				if err := handler(context.Background(), &msg); err != nil {
-					if v.ConsumedTimes > int64(config.MaxReconsumeTimes) {
-						handles = append(handles, v.ReceiptHandle)
-					} else {
-						logger.Error("aliyunmq: messageHandler error", zap.Int64("retry", v.ConsumedTimes), zap.Any("entity", v), zap.Error(err))
+					logger.Error("aliyunmq: messageHandler error", zap.Int64("retry", v.ConsumedTimes), zap.Any("entity", v), zap.Error(err))
+					if config.Kind != TopicKindOrderly {
+						// ConsumedTimes = 首次消费+ 重试次数
+						// 不设置,交由阿里云服务重试策略,最多288次重试
+						if config.MaxReconsumeTimes == 0 {
+							continue
+						}
+						if v.ConsumedTimes <= int64(config.MaxReconsumeTimes) {
+							continue
+						}
 					}
-				} else {
-					handles = append(handles, v.ReceiptHandle)
 				}
+				handles = append(handles, v.ReceiptHandle)
 			}
 			// NextConsumeTime前若不确认消息消费成功，则消息会被重复消费。
 			// 消息句柄有时间戳，同一条消息每次消费拿到的都不一样。

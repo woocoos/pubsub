@@ -28,6 +28,8 @@ func init() {
 	pubsub.RegisterProvider(mqTypeName, New)
 }
 
+var loggerInit sync.Once
+
 type TopicKind string
 
 const (
@@ -58,6 +60,7 @@ type ConsumerConfig struct {
 	// ConsumeMessageBatchMaxSize 单次消费消息数量, 默认以顺序消费合理值1为默认值
 	ConsumeMessageBatchMaxSize int
 	// MaxReconsumeTimes 最大重试次数,对于顺序消费，其为本地重试次数
+	// 最多16次, 10s,30s,1m,此后每次重试的时间间隔是上一次的 2 倍
 	MaxReconsumeTimes int
 	// SuspendCurrentQueueTimeMillis 消息消费失败后再次被投递给Consumer消费的间隔时间，只在顺序消费中起作用
 	// 需要注意的 实际消息次数 = 第一次 + MaxReconsumeTimes + 1, 最后一次暂时不确定
@@ -91,10 +94,10 @@ func New(cfg *conf.Configuration) (pubsub.Provider, error) {
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	if cfg.IsSet("log") {
-		sync.OnceFunc(func() {
+		loggerInit.Do(func() {
 			logger = newApacheLogger(cfg.Sub("log"))
 			rlog.SetLogger(logger)
-		})()
+		})
 	} else {
 		logger = &apacheLogger{
 			logger: log.Global().Logger(),
