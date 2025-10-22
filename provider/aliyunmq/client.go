@@ -204,6 +204,9 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 	case TopicKindOrderly:
 		producer = p.client.GetTransProducer(p.InstanceID, cc.Topic, cc.Group)
 		req.ShardingKey = opts.Metadata["shardingKey"]
+		if req.ShardingKey == "" {
+			req.ShardingKey = req.MessageKey
+		}
 	case TopicKindTrans:
 		producer = p.client.GetTransProducer(p.InstanceID, cc.Topic, cc.Group)
 	default:

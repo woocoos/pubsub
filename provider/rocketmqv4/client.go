@@ -129,11 +129,6 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 		if v, ok := opts.Metadata["tag"]; ok {
 			msg.WithTag(v)
 		}
-		if v, ok := opts.Metadata["shardingKey"]; ok {
-			msg.WithShardingKey(v)
-		} else if key != "" {
-			msg.WithShardingKey(key)
-		}
 	}
 
 	pdtmp, ok := p.producers[opts.ServiceName]
@@ -169,6 +164,13 @@ func (p *Provider) Publish(ctx context.Context, opts pubsub.PublishOptions, m *p
 		}
 
 		// TODO SendInTransaction
+	case TopicKindOrderly:
+		if v, ok := opts.Metadata["shardingKey"]; ok {
+			msg.WithShardingKey(v)
+		} else {
+			msg.WithShardingKey(msg.GetKeys())
+		}
+		fallthrough
 	default:
 		var pd rocketmq.Producer
 		if !ok {
